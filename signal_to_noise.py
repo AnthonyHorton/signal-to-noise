@@ -161,11 +161,17 @@ class Imager:
     
         return number_subs*sub_exp_time, number_subs
     
-    def SB_limit(self, total_exp_time, snr_target, sub_exp_time=600, binning=1, N=1, \
+    def SB_limit(self, total_exp_time, snr_target, snr_calculation='per pixel', sub_exp_time=600, binning=1, N=1, \
                  enable_read_noise=True, enable_sky_noise=True, enable_dark_noise=True):
-    
-        # Convert target SNR per array combined, binned pixel to SNR per unbinned pixel
         snr_target /= (N * binning)**0.5
+        # Convert target SNR per array combined, binned pixel to SNR per unbinned pixel
+        if snr_calculation == 'per pixel':
+            pass
+        elif snr_calculation == 'per arcseconds squared':
+            snr_target *= self.pixel_scale/(u.arcsecond/u.pixel)
+        else:
+            raise ValueError('invalid snr target type {}'.format(snr_calculation))
+            
         snr_target = ensure_unit(snr_target, u.dimensionless_unscaled)
     
         # Number of sub-exposures
@@ -187,8 +193,8 @@ class Imager:
     
         # Calculate science count rate for target signal to noise ratio
         a = (total_exp_time**2).value
-        b = -(snr_target**2 * total_exp_time).value
-        c = -(snr_target**2 * noise_squared).value
+        b = -((snr_target)**2 * total_exp_time).value
+        c = -((snr_target)**2 * noise_squared).value
         
         signal_rate = (-b + np.sqrt(b**2 - 4*a*c))/(2*a) *  u.electron / (u.pixel * u.second)
         
@@ -241,7 +247,7 @@ class Imager:
         # Band averaged efficiency, effective wavelengths, bandwidth (STSci definition), flux_integral
         i0 = np.trapz(effs, x=waves)
         i1 = np.trapz(effs*waves, x=waves)
-        self._iminus1 = np.trapz(effs/waves, x=waves) # This one is useful later
+        self._iminus1 = np.trapz(effs/waves, x=waves ) # This one is useful later
         self._iminus2 = np.trapz(effs/waves**2, x=waves)
         
         self.wavelengths = waves
@@ -267,4 +273,5 @@ class Imager:
         photon_flux = (sfd_sb_0 / energy) * self.optic.aperture_area * self.pixel_area * self.bandwidth
         
         self.gamma0 = photon_flux.to(u.photon/(u.s * u.pixel))
-        
+                     
+                      
