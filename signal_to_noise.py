@@ -4,6 +4,8 @@ from scipy.interpolate import interp1d
 from astropy import units as u
 from astropy import constants as c
 from astropy.table import Table
+from astropy.convolution import discretize_model
+from astropy.modeling.functional_models import Moffat2D
 
 def ensure_unit(arg, unit):
     if not isinstance(arg, u.Quantity):
@@ -92,6 +94,10 @@ class Imager:
         self.pixel_scale = self.pixel_scale.to(u.arcsecond/u.pixel, \
                                                equivalencies = u.equivalencies.dimensionless_angles())
         self.pixel_area = self.pixel_scale**2 * u.pixel
+
+        # Calculate field of view.
+        self.field_of_view = (self.camera.resolution * self.pixel_scale)
+        self.field_of_view = self.field_of_view.to(u.degree, equivalencies=u.dimensionless_angles())
         
         # Calculate end to end efficiencies, etc.
         self._efficiencies()
@@ -273,5 +279,73 @@ class Imager:
         photon_flux = (sfd_sb_0 / energy) * self.optic.aperture_area * self.pixel_area * self.bandwidth
         
         self.gamma0 = photon_flux.to(u.photon/(u.s * u.pixel))
-                     
-                      
+
+
+class Moffat_PSF:
+    def __init__(self, FWHM, alpha=2.5):
+        """
+        Class representing a 2D Moffat profile point spread function.
+
+        Used to calculate pixelated version of the PSF and associated parameters useful for
+        point source signal to noise and saturation limit calculations.
+
+        Args:
+            FWHM (u.arcseconds): Full Width at Half-Maximum of the PSF
+            alpha (optional): shape parameter, must be > 1, default 2.5
+
+        Smaller values of the alpha parameter correspond to 'wingier' profiles.
+        A value of 4.765 would give the best fit to pure Kolmogorov atmospheric turbulence.
+        When instrumental effects are added a lower value is appropriate.
+        IRAF uses a default of 2.5.
+        """
+        if alpha <= 1.0:
+            raise ValueError('alpha must be greater than 1!')
+        
+        self.FWHM = ensure_unit(FWHM, u.arcsecond)
+
+        self.model = Moffat2D(alpha=alpha)
+
+    def pixellated(self, pixel_scale, n_pix, offsets=(0.0, 0.0)):
+        """
+        Calculates a pixellated version of the PSF for a given pixel scale
+        """
+        # Convert FWHM from arcsecond to pixel units
+        FWHM_pix = self.FWHM / ensure_unit(pixel_scale, (u.arcsecond / u.pixel))
+        # Convert to FWHM to Moffat profile width parameter
+        gamma = FWHM_pix / (2 * np.sqrt(2**(1 / self.model.alpha) - 1))
+        # Calculate amplitude required for normalised PSF
+        amplitude = (self.model.alpha - 1) / (np.pi * gamma**2)
+        # Update model parameters
+        self.model.gamma = gamma.to(u.pixel).value
+        self.model.amplitude = amplitude.to(u.pixel**-2).value
+
+        # Update PSF centre coordinates
+        self.model.x_0 = offsets[0]
+        self.model.y_0 = offsets[1]
+        
+        xrange = (-(n_pix - 1) / 2, (n_pix + 1) / 2)
+        yrange = (-(n_pix - 1) / 2, (n_pix + 1) / 2)
+        
+        return discretize_model(self.model, xrange, yrange, mode='oversample', factor=10)
+        
+    def peak(self, pixel_scale):
+        """
+        Calculate the peak pixel value (as a fraction of total counts) for a PSF centred
+        on a pixel. This is useful for calculating saturation limits for point sources.
+        """
+        # Odd number of pixels (1) so offsets = (0, 0) is centred on a pixel
+        centred_psf = self.pixellated(pixel_scale, 1, offsets=(0, 0))
+        return centred_psf[0,0]
+
+    def n_pix(self, pixel_scale, n_pix=20):
+        """
+        Calculate the effective number of pixels for PSF fitting photometry with this
+        PSF, in the worse case where the PSF is centred on the corner of a pixel.
+        """
+        # Want a even number of pixels.
+        n_pix += n_pix % 2
+        # Even number of pixels so offsets = (0, 0) is centred on pixel corners
+        corner_psf = self.pixellated(pixel_scale, n_pix, offsets=(0, 0))
+        return 1/((corner_psf**2).sum())
+
+    
