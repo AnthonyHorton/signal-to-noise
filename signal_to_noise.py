@@ -281,8 +281,8 @@ class Imager:
         self.gamma0 = photon_flux.to(u.photon/(u.s * u.pixel))
 
 
-class Moffat_PSF:
-    def __init__(self, FWHM, alpha=2.5):
+class Moffat_PSF(Moffat2D):
+    def __init__(self, FWHM, alpha=2.5, pixel_scale=None):
         """
         Class representing a 2D Moffat profile point spread function.
 
@@ -300,33 +300,56 @@ class Moffat_PSF:
         """
         if alpha <= 1.0:
             raise ValueError('alpha must be greater than 1!')
+        super(Moffat_PSF, self).__init__(alpha=alpha)
+
+        self.FWHM = FWHM
+
+        if pixel_scale:
+            self.pixel_scale = pixel_scale
+
+    @property
+    def FWHM(self):
+        return self._FWHM
+
+    @FWHM.setter
+    def FWHM(self, FWHM):
+        self._FWHM = ensure_unit(FWHM, u.arcsecond)        
+        # If a pixel scale has been set should update model parameters when FWHM changes.
+        if self.pixel_scale:
+            self._update_model()
+
+    @property
+    def pixel_scale(self):
+        try:
+            return self._pixel_scale
+        except AttributeError:
+            return None
+
+    @pixel_scale.setter
+    def pixel_scale(self, pixel_scale):
+        self._pixel_scale = ensure_unit(pixel_scale, (u.arcsecond / u.pixel))
+        # When pixel scale is set/changed need to update model parameters:
+        self._update_model()
         
-        self.FWHM = ensure_unit(FWHM, u.arcsecond)
-
-        self.model = Moffat2D(alpha=alpha)
-
-    def pixellated(self, pixel_scale, n_pix, offsets=(0.0, 0.0)):
+    def pixellated(self, pixel_scale=None, n_pix=21, offsets=(0.0, 0.0)):
         """
         Calculates a pixellated version of the PSF for a given pixel scale
         """
-        # Convert FWHM from arcsecond to pixel units
-        FWHM_pix = self.FWHM / ensure_unit(pixel_scale, (u.arcsecond / u.pixel))
-        # Convert to FWHM to Moffat profile width parameter
-        gamma = FWHM_pix / (2 * np.sqrt(2**(1 / self.model.alpha) - 1))
-        # Calculate amplitude required for normalised PSF
-        amplitude = (self.model.alpha - 1) / (np.pi * gamma**2)
-        # Update model parameters
-        self.model.gamma = gamma.to(u.pixel).value
-        self.model.amplitude = amplitude.to(u.pixel**-2).value
+        if pixel_scale:
+            self.pixel_scale = pixel_scale
+        else:
+            # Should make sure _update_model() gets called anyway, in case
+            # alpha has been changed.
+            self._update_model()
 
         # Update PSF centre coordinates
-        self.model.x_0 = offsets[0]
-        self.model.y_0 = offsets[1]
+        self.x_0 = offsets[0]
+        self.y_0 = offsets[1]
         
         xrange = (-(n_pix - 1) / 2, (n_pix + 1) / 2)
         yrange = (-(n_pix - 1) / 2, (n_pix + 1) / 2)
         
-        return discretize_model(self.model, xrange, yrange, mode='oversample', factor=10)
+        return discretize_model(self, xrange, yrange, mode='oversample', factor=10)
         
     def peak(self, pixel_scale):
         """
@@ -347,5 +370,14 @@ class Moffat_PSF:
         # Even number of pixels so offsets = (0, 0) is centred on pixel corners
         corner_psf = self.pixellated(pixel_scale, n_pix, offsets=(0, 0))
         return 1/((corner_psf**2).sum())
-
     
+    def _update_model(self):
+        # Convert FWHM from arcsecond to pixel units
+        self._FWHM_pix = self.FWHM / self.pixel_scale
+        # Convert to FWHM to Moffat profile width parameter in pixel units
+        gamma = self._FWHM_pix / (2 * np.sqrt(2**(1 / self.alpha) - 1))
+        # Calculate amplitude required for normalised PSF 
+        amplitude = (self.alpha - 1) / (np.pi * gamma**2)
+        # Update model parameters
+        self.gamma = gamma.to(u.pixel).value
+        self.amplitude = amplitude.to(u.pixel**-2).value
