@@ -232,6 +232,25 @@ class Imager:
         
         return flux.to(u.W / (u.m**2))
     
+    def pointsource_snr(self, signal_mag, total_exp_time, sub_exp_time=300 * u.second, binning=1, N=1):
+        signal_mag *= u.ABmag
+        signal_rate = self.ABmag_to_rate(signal_mag) / (6.7810449442290848 * u.pixel)
+        signal_SB = self.rate_to_SB(signal_rate)
+        return self.SB_snr(signal_SB.value, total_exp_time, sub_exp_time, binning, N)
+        
+    def pointsource_etc(self, signal_mag, snr_target, sub_exp_time=300 * u.second, binning=1, N=1):
+        signal_mag *= u.ABmag
+        signal_rate = self.ABmag_to_rate(signal_mag) / (6.7810449442290848 * u.pixel)
+        signal_SB = self.rate_to_SB(signal_rate)
+        return self.SB_etc(signal_SB.value, snr_target, sub_exp_time, binning, N)
+    
+    def pointsource_limit(self, total_exp_time, snr_target, snr_calculation='per pixel', sub_exp_time=600, \
+                          binning=1, N=1, enable_read_noise=True, enable_sky_noise=True, enable_dark_noise=True):
+        signal_SB = self.SB_limit(total_exp_time, snr_target, snr_calculation, sub_exp_time, binning, N, \
+                 enable_read_noise, enable_sky_noise, enable_dark_noise) 
+        signal_rate = self.SB_to_rate(signal_SB) * (6.7810449442290848 * u.pixel)
+        return self.rate_to_ABmag(signal_rate)
+    
     def _efficiencies(self):
         # Fine wavelength grid spanning range of filter transmission profile
         waves = np.arange(self.band.wavelengths.value.min(), self.band.wavelengths.value.max(), 1) * u.nm
