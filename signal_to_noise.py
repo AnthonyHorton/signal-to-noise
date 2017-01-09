@@ -77,27 +77,37 @@ class Filter:
         self.sky_mu = ensure_unit(sky_mu, u.ABmag)
 
 class Imager:
-    def __init__(self, optic, camera, band):
+    def __init__(self, optic, camera, band, PSF=None):
         if not isinstance(optic, Optic):
             raise ValueError("optic must be an instance of the Optic class")
         if not isinstance(camera, Camera):
             raise ValueError("camera must be an instance of the Camera class")
         if not isinstance(band, Filter):
             raise ValueError("band must be an instance of the Filter class")
+        if PSF and not isinstance (PSF, Moffat_PSF):
+            raise ValueError("PSF must be an instance of the Moffat PSF class")
             
         self.optic = optic
         self.camera = camera
         self.band = band
+        self.PSF = PSF
         
         # Calculate pixel scale, area
         self.pixel_scale = (self.camera.pixel_size / self.optic.focal_length)
         self.pixel_scale = self.pixel_scale.to(u.arcsecond/u.pixel, \
                                                equivalencies = u.equivalencies.dimensionless_angles())
         self.pixel_area = self.pixel_scale**2 * u.pixel
-
+        self.PSF.pixel_scale = self.pixel_scale
+        
         # Calculate field of view.
         self.field_of_view = (self.camera.resolution * self.pixel_scale)
         self.field_of_view = self.field_of_view.to(u.degree, equivalencies=u.dimensionless_angles())
+        
+        #Calculate n_pix value
+        self.n_pix = self.PSF.n_pix()
+        
+        #Calculate peak value
+        self.peak = self.PSF.peak()
         
         # Calculate end to end efficiencies, etc.
         self._efficiencies()
@@ -240,13 +250,13 @@ class Imager:
     
     def pointsource_snr(self, signal_mag, total_exp_time, sub_exp_time=300 * u.second, binning=1, N=1):
         signal_mag *= u.ABmag
-        signal_rate = self.ABmag_to_rate(signal_mag) / (6.7810449442290848 * u.pixel)
+        signal_rate = self.ABmag_to_rate(signal_mag) / (self.n_pix * u.pixel)
         signal_SB = self.rate_to_SB(signal_rate)
         return self.SB_snr(signal_SB.value, total_exp_time, sub_exp_time, binning, N)
         
     def pointsource_etc(self, signal_mag, snr_target, sub_exp_time=300 * u.second, binning=1, N=1):
         signal_mag *= u.ABmag
-        signal_rate = self.ABmag_to_rate(signal_mag) / (6.7810449442290848 * u.pixel)
+        signal_rate = self.ABmag_to_rate(signal_mag) / (self.n_pix * u.pixel)
         signal_SB = self.rate_to_SB(signal_rate)
         return self.SB_etc(signal_SB.value, snr_target, sub_exp_time, binning, N)
     
@@ -254,7 +264,7 @@ class Imager:
                           binning=1, N=1, enable_read_noise=True, enable_sky_noise=True, enable_dark_noise=True):
         signal_SB = self.SB_limit(total_exp_time, snr_target, snr_calculation, sub_exp_time, binning, N, \
                  enable_read_noise, enable_sky_noise, enable_dark_noise) 
-        signal_rate = self.SB_to_rate(signal_SB) * (6.7810449442290848 * u.pixel)
+        signal_rate = self.SB_to_rate(signal_SB) * (self.n_pix * u.pixel)
         return self.rate_to_ABmag(signal_rate)
     
     def _efficiencies(self):
@@ -370,7 +380,7 @@ class Moffat_PSF(Moffat2D):
         
         return discretize_model(self, xrange, yrange, mode='oversample', factor=10)
         
-    def peak(self, pixel_scale):
+    def peak(self, pixel_scale=None):
         """
         Calculate the peak pixel value (as a fraction of total counts) for a PSF centred
         on a pixel. This is useful for calculating saturation limits for point sources.
@@ -379,7 +389,7 @@ class Moffat_PSF(Moffat2D):
         centred_psf = self.pixellated(pixel_scale, 1, offsets=(0, 0))
         return centred_psf[0,0]
 
-    def n_pix(self, pixel_scale, n_pix=20):
+    def n_pix(self, pixel_scale=None, n_pix=20):
         """
         Calculate the effective number of pixels for PSF fitting photometry with this
         PSF, in the worse case where the PSF is centred on the corner of a pixel.
