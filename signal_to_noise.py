@@ -177,13 +177,13 @@ class Imager:
     
         return number_subs*sub_exp_time, number_subs
     
-    def SB_limit(self, total_exp_time, snr_target, snr_calculation='per pixel', sub_exp_time=600, binning=1, N=1, \
+    def SB_limit(self, total_exp_time, snr_target, snr_type='per pixel', sub_exp_time=600, binning=1, N=1, \
                  enable_read_noise=True, enable_sky_noise=True, enable_dark_noise=True):
         snr_target /= (N * binning)**0.5
         # Convert target SNR per array combined, binned pixel to SNR per unbinned pixel
-        if snr_calculation == 'per pixel':
+        if snr_type == 'per pixel':
             pass
-        elif snr_calculation == 'per arcseconds squared':
+        elif snr_type == 'per arcseconds squared':
             snr_target *= self.pixel_scale/(u.arcsecond/u.pixel)
         else:
             raise ValueError('invalid snr target type {}'.format(snr_calculation))
@@ -194,16 +194,14 @@ class Imager:
         total_exp_time = ensure_unit(total_exp_time, u.second)
         sub_exp_time = ensure_unit(sub_exp_time, u.second)
         
-        number_subs = int(math.ceil(total_exp_time/sub_exp_time))
+        number_subs = np.ceil(total_exp_time/sub_exp_time).astype(int)
         
-        if (total_exp_time != number_subs * sub_exp_time):
-            total_exp_time = number_subs * sub_exp_time
-            print('Rounding up total exposure time to next integer multiple of sub-exposure time:', total_exp_time)
+        total_exp_time = number_subs * sub_exp_time
         
         # Noise sources
         sky_counts = self.sky_rate * total_exp_time if enable_sky_noise else 0.0 * u.electron / u.pixel
         dark_counts = self.camera.dark_current * total_exp_time if enable_dark_noise else 0.0 * u.electron / u.pixel
-        total_read_noise = math.sqrt(number_subs) * self.camera.read_noise if enable_read_noise else 0.0 * u.electron / u.pixel
+        total_read_noise = np.sqrt(number_subs) * self.camera.read_noise if enable_read_noise else 0.0 * u.electron / u.pixel
     
         noise_squared = (sky_counts.value + dark_counts.value + total_read_noise.value**2) * u.electron**2 / u.pixel**2
     
@@ -249,23 +247,26 @@ class Imager:
         return flux.to(u.W / (u.m**2))
     
     def pointsource_snr(self, signal_mag, total_exp_time, sub_exp_time=300 * u.second, binning=1, N=1):
-        signal_mag *= u.ABmag
-        signal_rate = self.ABmag_to_rate(signal_mag) / (self.n_pix * u.pixel)
-        signal_SB = self.rate_to_SB(signal_rate)
+        signal_mag = ensure_unit(signal_mag, u.ABmag) #ensuring that the units of point source signal magnitude is AB mag
+        signal_rate = self.ABmag_to_rate(signal_mag) / (self.n_pix * u.pixel) #converting the signal magnitude to signal rate in electron/pixel/second 
+        signal_SB = self.rate_to_SB(signal_rate) #converting the signal rate to surface brightness 
+        binning *= self.n_pix #scaling the binning by the number of pixels covered by the point source
         return self.SB_snr(signal_SB.value, total_exp_time, sub_exp_time, binning, N)
         
     def pointsource_etc(self, signal_mag, snr_target, sub_exp_time=300 * u.second, binning=1, N=1):
-        signal_mag *= u.ABmag
+        signal_mag = ensure_unit(signal_mag, u.ABmag)
         signal_rate = self.ABmag_to_rate(signal_mag) / (self.n_pix * u.pixel)
         signal_SB = self.rate_to_SB(signal_rate)
+        binning *= self.n_pix
         return self.SB_etc(signal_SB.value, snr_target, sub_exp_time, binning, N)
     
     def pointsource_limit(self, total_exp_time, snr_target, snr_calculation='per pixel', sub_exp_time=600, \
                           binning=1, N=1, enable_read_noise=True, enable_sky_noise=True, enable_dark_noise=True):
+        binning *= self.n_pix
         signal_SB = self.SB_limit(total_exp_time, snr_target, snr_calculation, sub_exp_time, binning, N, \
-                 enable_read_noise, enable_sky_noise, enable_dark_noise) 
-        signal_rate = self.SB_to_rate(signal_SB) * (self.n_pix * u.pixel)
-        return self.rate_to_ABmag(signal_rate)
+                 enable_read_noise, enable_sky_noise, enable_dark_noise) #Calculating the surface brightness limit
+        signal_rate =self.SB_to_rate(signal_SB) * (self.n_pix * u.pixel) #Calculating the signal rate associated with the limit
+        return self.rate_to_ABmag(signal_rate) #Converting the signal rate to point source brightness limit
     
     def _efficiencies(self):
         # Fine wavelength grid spanning range of filter transmission profile
