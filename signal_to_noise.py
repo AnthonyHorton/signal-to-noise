@@ -248,7 +248,7 @@ class Imager:
     
     def pointsource_snr(self, signal_mag, total_exp_time, sub_exp_time=300 * u.second, binning=1, N=1):
         signal_mag = ensure_unit(signal_mag, u.ABmag) #ensuring that the units of point source signal magnitude is AB mag
-        signal_rate = self.ABmag_to_rate(signal_mag) / (self.n_pix * u.pixel) #converting the signal magnitude to signal rate in electron/pixel/second 
+        signal_rate = self.ABmag_to_rate(signal_mag) / (self.n_pix * u.pixel) #converting the signal magnitude to signal rate in electron/pixel/second
         signal_SB = self.rate_to_SB(signal_rate) #converting the signal rate to surface brightness 
         binning *= self.n_pix #scaling the binning by the number of pixels covered by the point source
         return self.SB_snr(signal_SB.value, total_exp_time, sub_exp_time, binning, N)
@@ -260,13 +260,28 @@ class Imager:
         binning *= self.n_pix
         return self.SB_etc(signal_SB.value, snr_target, sub_exp_time, binning, N)
     
-    def pointsource_limit(self, total_exp_time, snr_target, snr_calculation='per pixel', sub_exp_time=600, \
+    def pointsource_limit(self, total_exp_time, snr_target, sub_exp_time=600 * u.second, \
                           binning=1, N=1, enable_read_noise=True, enable_sky_noise=True, enable_dark_noise=True):
+        snr_type='per pixel'
         binning *= self.n_pix
-        signal_SB = self.SB_limit(total_exp_time, snr_target, snr_calculation, sub_exp_time, binning, N, \
+        signal_SB = self.SB_limit(total_exp_time, snr_target, snr_type, sub_exp_time, binning, N, \
                  enable_read_noise, enable_sky_noise, enable_dark_noise) #Calculating the surface brightness limit
         signal_rate =self.SB_to_rate(signal_SB) * (self.n_pix * u.pixel) #Calculating the signal rate associated with the limit
         return self.rate_to_ABmag(signal_rate) #Converting the signal rate to point source brightness limit
+   
+    #calculating the saturation magntiude limit for point objects
+    def pointsource_saturation (self, bit_depth, full_well, gain, exp_time): 
+        #calculation of the maximum signal limit (in electrons) before saturation
+        full_well = ensure_unit(full_well, u.electron)
+        gain = ensure_unit(gain, u.electron/u.adu)
+        digital_limit = ((2 ** bit_depth - 1) - 1500)* u.adu * gain
+        exp_time = ensure_unit(exp_time, u.second)
+        signal_rate = min(full_well, digital_limit) / (exp_time * u.pixel)   
+        
+        #taking the sky rate & dark currents out & calculating the signal rate over the entire area occupied by the pointsource
+        net_signal_rate = ((signal_rate - self.sky_rate - self.camera.dark_current) / self.peak) * u.pixel
+        
+        return self.rate_to_ABmag(net_signal_rate) 
     
     def _efficiencies(self):
         # Fine wavelength grid spanning range of filter transmission profile
