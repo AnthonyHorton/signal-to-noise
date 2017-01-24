@@ -263,20 +263,22 @@ class Imager:
 # now we create a function that takes in a sub exposure time, total
 # elapsed time and readout time and gives out total exposure time (maximum
 # time)
-    def maximum_time(self, total_elapsed_time, sub_exp_time, readout_time=2 * u.second)
+    def maximum_time(self, total_elapsed_time, sub_exp_time, readout_time=2 * u.second):
         total_elapsed_time = ensure_unit(total_elapsed_time, u.second)
         sub_exp_time = ensure_unit(sub_exp_time, u.second)
         num_of_subs = total_elapsed_time / (sub_exp_time + readout_time)
         total_exposure_time = num_of_subs * sub_exp_time
         return total_exposure_time
 
-    def pointsource_snr(self, signal_mag, total_exp_time, sub_exp_time=300 * u.second, binning=1, N=1):
+    def pointsource_snr(self, signal_mag, total_exp_time, sub_exp_time=300 * u.second, binning=1, N=1, elapsed_time=False, readout_time=2 * u.second):
         # ensuring that the units of point source signal magnitude is AB mag
         signal_mag = ensure_unit(signal_mag, u.ABmag)
         # converting the signal magnitude to signal rate in electron/pixel/second
         signal_rate = self.ABmag_to_rate(signal_mag) / (self.n_pix * u.pixel)
         signal_SB = self.rate_to_SB(signal_rate)  # converting the signal rate to surface brightness
         binning *= self.n_pix  # scaling the binning by the number of pixels covered by the point source
+        if elapsed_time == True:
+            total_exp_time = self.maximum_time(total_exp_time + readout_time, sub_exp_time, readout_time)
         return self.SB_snr(signal_SB.value, total_exp_time, sub_exp_time, binning, N)
 
     def pointsource_etc(self, signal_mag, snr_target, sub_exp_time=300 * u.second, binning=1, N=1):
@@ -291,7 +293,6 @@ class Imager:
                           elapsed_time=False, readout_time=2 * u.second):
         snr_type = 'per pixel'
         binning *= self.n_pix
-
         if elapsed_time == True:
             total_exp_time = self.maximum_time(total_exp_time + readout_time, sub_exp_time, readout_time)
         signal_SB = self.SB_limit(total_exp_time, snr_target, snr_type, sub_exp_time, binning, N,
@@ -320,7 +321,7 @@ class Imager:
         full_well = ensure_unit(full_well, u.electron)
         gain = ensure_unit(gain, u.electron / u.adu)
         digital_limit = ((2 ** bit_depth - 1) - 1500) * u.adu * gain
-
+        minimum_mag=ensure_unit(minimum_mag, u.ABmag)
         net_signal_rate = self.ABmag_to_rate(minimum_mag)
         signal_rate = ((net_signal_rate * self.peak) / u.pixel) + self.sky_rate + self.camera.dark_current
         sub_exp_time = (min(full_well, digital_limit)) / (signal_rate * u.pixel)
@@ -479,7 +480,7 @@ class Moffat_PSF(Moffat2D):
 
 class ImagerArray:
 
-    def __init__(self, imager1, imager2, imager3, imager4, imager5, imager6, imager7, imager8, imager9, imager10)
+    def __init__(self, imager1, imager2, imager3, imager4, imager5, imager6, imager7, imager8, imager9, imager10):
         if not isinstance(imager1, Imager):
             raise ValueError("Imager must be an instance of the Imager class")
         if not isinstance(imager2, Imager):
@@ -510,3 +511,19 @@ class ImagerArray:
         self.imager8 = imager8
         self.imager9 = imager9
         self.imager10 = imager10
+        
+        #assuming all the imagers are the same, we assign the minimum exposure time value of imager1 to the whole class
+        self.minimum_exposure = self.imager1.minimum_exposure
+        
+    def exposure_time_array(self, bit_depth, full_well, gain, minimum_magnitude, factor, step_size):
+        mylist = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        
+        #assuming all the imagers are the same, we perform the calculations for imager1
+        n = math.log((self.imager1.ps_minimexposure(bit_depth, full_well, gain, minimum_magnitude))/\
+                     (self.imager1.minimum_exposure), factor)
+        
+        n = math.floor(n) #n is the minimum index such that the first exposure time we choose i.e. mylist[0] is the longest exposure time which is shorter than the minimum exposure time that achieves saturation at the minimum_magnitude value
+        
+        for i in range(0,10):
+            mylist[i] = self.imager1.minimum_exposure * (factor ** (n + i * step_size))
+        return mylist
