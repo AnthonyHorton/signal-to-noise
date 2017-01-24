@@ -283,6 +283,18 @@ class Imager:
         
         return self.rate_to_ABmag(net_signal_rate) 
     
+    def ps_minimexposure (self, bit_depth, full_well, gain, minimum_mag):
+        
+        full_well = ensure_unit(full_well, u.electron)
+        gain = ensure_unit(gain, u.electron/u.adu)
+        digital_limit = ((2 ** bit_depth - 1) - 1500)* u.adu * gain
+        
+        net_signal_rate = self.ABmag_to_rate(minimum_mag)
+        signal_rate = ((net_signal_rate * self.peak)/u.pixel) + self.sky_rate + self.camera.dark_current
+        sub_exp_time = (min(full_well, digital_limit)) / (signal_rate * u.pixel)
+        return sub_exp_time
+        
+    
     def _efficiencies(self):
         # Fine wavelength grid spanning range of filter transmission profile
         waves = np.arange(self.band.wavelengths.value.min(), self.band.wavelengths.value.max(), 1) * u.nm
