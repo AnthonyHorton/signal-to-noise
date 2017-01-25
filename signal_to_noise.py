@@ -515,8 +515,8 @@ class ImagerArray:
         #assuming all the imagers are the same, we assign the minimum exposure time value of imager1 to the whole class
         self.minimum_exposure = self.imager1.minimum_exposure
         
-    def exposure_time_array(self, bit_depth, full_well, gain, minimum_magnitude, factor, step_size):
-        mylist = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    def exposure_time_array(self, bit_depth, full_well, gain, minimum_magnitude, factor, readout_time=2 * u.second):
+        mylist = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] * u.second
         
         #assuming all the imagers are the same, we perform the calculations for imager1
         n = math.log((self.imager1.ps_minimexposure(bit_depth, full_well, gain, minimum_magnitude))/\
@@ -525,5 +525,10 @@ class ImagerArray:
         n = math.floor(n) #n is the minimum index such that the first exposure time we choose i.e. mylist[0] is the longest exposure time which is shorter than the minimum exposure time that achieves saturation at the minimum_magnitude value
         
         for i in range(0,10):
-            mylist[i] = self.imager1.minimum_exposure * (factor ** (n + i * step_size))
+            mylist[i] = self.imager1.minimum_exposure * (factor ** (n + i))
+        
+        for i in range(0,10):
+            a = (mylist[9] + readout_time) / (mylist[i] + readout_time)
+            mylist[i] = (mylist[9] + readout_time)/(math.ceil(a)) - readout_time
+            
         return mylist
