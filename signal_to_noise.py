@@ -6,6 +6,10 @@ from astropy import constants as c
 from astropy.table import Table
 from astropy.convolution import discretize_model
 from astropy.modeling.functional_models import Moffat2D
+from matplotlib import pyplot as plt
+import matplotlib as mpl
+mpl.rc('text', usetex=False)
+mpl.rcParams['figure.figsize'] = 8, 6
 
 
 def ensure_unit(arg, unit):
@@ -131,7 +135,7 @@ class Imager:
         # Calculate gamma0
         self._gamma0()
 
-    def SB_snr(self, signal_SB, total_exp_time, sub_exp_time=300 * u.second, binning=1, N=1):
+    def SB_snr(self, signal_SB, total_exp_time, sub_exp_time=300 * u.second, binning=1, N=1, signoise_return = False):
 
         # Signal count rates
         signal_rate = self.SB_to_rate(signal_SB)  # e/pixel/second
@@ -153,11 +157,14 @@ class Imager:
         total_read_noise = ((number_subs)**0.5 * self.camera.read_noise).to(u.electron / u.pixel)
 
         noise = (signal.value + sky_counts.value + dark_counts.value + total_read_noise.value**2)**0.5
-        noise *= u.electron / u.pixel
+        noise = noise * u.electron / u.pixel
 
         snr = (N * binning)**0.5 * signal / noise  # Number of optics in array or pixel binning increases snr as n^0.5
-
-        return snr.to(u.dimensionless_unscaled)
+        
+        if signoise_return == True:
+            return signal, noise
+        else:
+            return snr.to(u.dimensionless_unscaled)
 
     def SB_etc(self, signal_SB, snr_target, sub_exp_time=300 * u.second, binning=1, N=1):
 
@@ -190,7 +197,7 @@ class Imager:
 
         return number_subs * sub_exp_time, number_subs
 
-    def SB_limit(self, total_exp_time, snr_target, snr_type='per pixel', sub_exp_time=600, binning=1, N=1,
+    def SB_limit(self, total_exp_time, snr_target, snr_type='per pixel', sub_exp_time=600 * u.second, binning=1, N=1,
                  enable_read_noise=True, enable_sky_noise=True, enable_dark_noise=True):
         snr_target /= (N * binning)**0.5
         # Convert target SNR per array combined, binned pixel to SNR per unbinned pixel
@@ -270,7 +277,7 @@ class Imager:
         total_exposure_time = num_of_subs * sub_exp_time
         return total_exposure_time
 
-    def pointsource_snr(self, signal_mag, total_exp_time, sub_exp_time=300 * u.second, binning=1, N=1, elapsed_time=False, readout_time=2 * u.second):
+    def pointsource_snr(self, signal_mag, total_exp_time, sub_exp_time=300 * u.second, binning=1, N=1, elapsed_time=False, readout_time=2 * u.second, signoisereturn = False):
         # ensuring that the units of point source signal magnitude is AB mag
         signal_mag = ensure_unit(signal_mag, u.ABmag)
         # converting the signal magnitude to signal rate in electron/pixel/second
@@ -279,7 +286,7 @@ class Imager:
         binning *= self.n_pix  # scaling the binning by the number of pixels covered by the point source
         if elapsed_time == True:
             total_exp_time = self.maximum_time(total_exp_time + readout_time, sub_exp_time, readout_time)
-        return self.SB_snr(signal_SB.value, total_exp_time, sub_exp_time, binning, N)
+        return self.SB_snr(signal_SB, total_exp_time, sub_exp_time, binning, N, signoise_return = signoisereturn)
 
     def pointsource_etc(self, signal_mag, snr_target, sub_exp_time=300 * u.second, binning=1, N=1):
         signal_mag = ensure_unit(signal_mag, u.ABmag)
@@ -328,6 +335,7 @@ class Imager:
         if sub_exp_time < self.minimum_exposure:
             print("sub exposure time cannot be less than the minimum exposure time for the camera.")
             sub_exp_time = self.minimum_exposure
+        sub_exp_time = ensure_unit(sub_exp_time, u.second)
         return sub_exp_time
 
     def _efficiencies(self):
@@ -480,55 +488,76 @@ class Moffat_PSF(Moffat2D):
 
 class ImagerArray:
 
-    def __init__(self, imager1, imager2, imager3, imager4, imager5, imager6, imager7, imager8, imager9, imager10):
-        if not isinstance(imager1, Imager):
-            raise ValueError("Imager must be an instance of the Imager class")
-        if not isinstance(imager2, Imager):
-            raise ValueError("Imager must be an instance of the Imager class")
-        if not isinstance(imager3, Imager):
-            raise ValueError("Imager must be an instance of the Imager class")
-        if not isinstance(imager4, Imager):
-            raise ValueError("Imager must be an instance of the Imager class")
-        if not isinstance(imager5, Imager):
-            raise ValueError("Imager must be an instance of the Imager class")
-        if not isinstance(imager6, Imager):
-            raise ValueError("Imager must be an instance of the Imager class")
-        if not isinstance(imager7, Imager):
-            raise ValueError("Imager must be an instance of the Imager class")
-        if not isinstance(imager8, Imager):
-            raise ValueError("Imager must be an instance of the Imager class")
-        if not isinstance(imager9, Imager):
-            raise ValueError("Imager must be an instance of the Imager class")
-        if not isinstance(imager10, Imager):
-            raise ValueError("Imager must be an instance of the Imager class")
-        self.imager1 = imager1
-        self.imager2 = imager2
-        self.imager3 = imager3
-        self.imager4 = imager4
-        self.imager5 = imager5
-        self.imager6 = imager6
-        self.imager7 = imager7
-        self.imager8 = imager8
-        self.imager9 = imager9
-        self.imager10 = imager10
+    def __init__(self, imager_list):
+        for imager in imager_list:
+            if not isinstance(imager, Imager):
+                raise ValueError("Imager must be an instance of the Imager class")
+        self.imager_list=imager_list
+        self.num_cameras=len(self.imager_list) #number of cameras or imagers
         
         #assuming all the imagers are the same, we assign the minimum exposure time value of imager1 to the whole class
-        self.minimum_exposure = self.imager1.minimum_exposure
+        self.minimum_exposure = self.imager_list[0].minimum_exposure
         
-    def exposure_time_array(self, bit_depth, full_well, gain, minimum_magnitude, factor, readout_time=2 * u.second):
-        mylist = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] * u.second
+    def exposure_time_array(self, bit_depth, full_well, gain, minimum_magnitude, factor=2, readout_time=2 * u.second):
+        mylist = [] #setting a list up
+        a = [] #initializing a list
         
-        #assuming all the imagers are the same, we perform the calculations for imager1
-        n = math.log((self.imager1.ps_minimexposure(bit_depth, full_well, gain, minimum_magnitude))/\
-                     (self.imager1.minimum_exposure), factor)
+        for i in range(0,self.num_cameras):
+            mylist.append(self.imager_list[0].ps_minimexposure(bit_depth, full_well, gain, minimum_magnitude)* (factor ** i))
         
-        n = math.floor(n) #n is the minimum index such that the first exposure time we choose i.e. mylist[0] is the longest exposure time which is shorter than the minimum exposure time that achieves saturation at the minimum_magnitude value
-        
-        for i in range(0,10):
-            mylist[i] = self.imager1.minimum_exposure * (factor ** (n + i))
-        
-        for i in range(0,10):
-            a = (mylist[9] + readout_time) / (mylist[i] + readout_time)
-            mylist[i] = (mylist[9] + readout_time)/(math.ceil(a)) - readout_time
+        for i in range(0,self.num_cameras):
+            a.append(math.ceil((mylist[-1] + readout_time) / (mylist[i] + readout_time)))
+            mylist[i] = (mylist[-1] + readout_time)/(a[i]) - readout_time
             
         return mylist
+    
+    def saturation_limits(self, bit_depth, full_well, gain, minimum_magnitude, factor=2, readout_time = 2 * u.second):
+        mylist = self.exposure_time_array(bit_depth, full_well, gain, minimum_magnitude, factor, readout_time)
+        saturation = []
+        for i in range(0,self.num_cameras):
+            saturation.append(self.imager_list[0].pointsource_saturation(bit_depth, full_well, gain, mylist[i]))
+        return saturation
+    
+    def snr_plots(self, bit_depth, full_well, gain, minimum_magnitude, factor, readouttime = 2 * u.second):
+        mylist = self.exposure_time_array(bit_depth, full_well, gain, minimum_magnitude, factor, readouttime)
+        saturation = self.saturation_limits(bit_depth, full_well, gain, minimum_magnitude, factor, readouttime)
+        mag_range = []
+        for i in range(0,self.num_cameras):
+            mag_range.append(np.arange(saturation[i].value, 40, 0.1)* u.ABmag)
+            data1 = self.imager_list[0].pointsource_snr(mag_range[i], mylist[-1], mylist[i], binning=1, N=1, elapsed_time=True, readout_time = readouttime)
+            plt.subplot(self.num_cameras,1,i+1)
+            plt.plot(mag_range[i], data1, linewidth=3)      
+            plt.ylim(0, 1000)
+            plt.xlabel('Magnitude / AB mag', fontsize=20)
+            plt.ylabel('SNR in $\sigma$', fontsize=20)
+            plt.title('SNR calculation of the range of magnitudes', fontsize=24)
+            plt.gcf().set_size_inches(24, 10 * self.num_cameras)
+            
+    def snr_plot(self, bit_depth, full_well, gain, minimum_magnitude, factor, readouttime = 2 * u.second):
+        mylist = self.exposure_time_array(bit_depth, full_well, gain, minimum_magnitude, factor, readouttime)
+        saturation = self.saturation_limits(bit_depth, full_well, gain, minimum_magnitude, factor, readouttime)
+        mag_range = np.arange(saturation[0].value, 40, 0.1) * u.ABmag
+        signal = []
+        noise = []
+        net_signal = 0 #initializing 
+        net_noise = 0 #initializing
+        binning = 1
+        N = 1
+        
+        for i in range(0, self.num_cameras):
+            signal.append(self.imager_list[0].pointsource_snr(mag_range, mylist[-1], mylist[i], binning=1, N=1, elapsed_time=True, readout_time = readouttime, signoisereturn=True)[0].value)
+            noise.append(self.imager_list[0].pointsource_snr(mag_range, mylist[-1], mylist[i], binning=1, N=1, elapsed_time=True, readout_time = readouttime, signoisereturn=True)[1].value)
+            net_signal = net_signal + signal[i]
+            net_noise = np.sqrt(net_noise ** 2 + noise[i] ** 2)
+        binning = binning * self.imager_list[0].n_pix
+        snr = (N * binning)**0.5 * net_signal / net_noise
+        
+        plt.plot(mag_range, snr, linewidth=3)
+        plt.ylim(0, 5000)
+        plt.xlabel('Magnitude / AB mag', fontsize=20)
+        plt.ylabel('SNR in $\sigma$', fontsize=20)
+        plt.title('Combined SNR for the array of imagers', fontsize=24)
+        plt.gcf().set_size_inches(24, 12)
+
+            
+        
