@@ -23,6 +23,7 @@ def sbig():
                   dark_current = 0.04 * u.electron / (u.second * u.pixel), \
                   QE_filename = "resources/ML8300M_QE.csv", \
                   minimum_exposure = 0.1 * u.second) # Dark current 'average' at -10C
+
 @pytest.fixture
 def fli():
     return snr.Camera(pixel_size = 6.0 * u.micron / u.pixel, \

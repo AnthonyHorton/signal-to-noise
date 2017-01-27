@@ -483,8 +483,8 @@ class Moffat_PSF(Moffat2D):
         self.gamma = gamma.to(u.pixel).value
         self.amplitude = amplitude.to(u.pixel**-2).value
 
-# Now we create an ImagerArray class, which takes various imagers and assigns different exposure times to each imager
 
+#Now we create an ImagerArray class, which takes various imagers and assigns different exposure times to each imager
 
 class ImagerArray:
 
@@ -518,25 +518,32 @@ class ImagerArray:
             saturation.append(self.imager_list[0].pointsource_saturation(bit_depth, full_well, gain, mylist[i]))
         return saturation
     
+    #The following function generates individual plots of SNR versus magnitude for each of the imager used 
     def snr_plots(self, bit_depth, full_well, gain, minimum_magnitude, factor, readouttime = 2 * u.second):
         mylist = self.exposure_time_array(bit_depth, full_well, gain, minimum_magnitude, factor, readouttime)
         saturation = self.saturation_limits(bit_depth, full_well, gain, minimum_magnitude, factor, readouttime)
         mag_range = []
         for i in range(0,self.num_cameras):
-            mag_range.append(np.arange(saturation[i].value, 40, 0.1)* u.ABmag)
-            data1 = self.imager_list[0].pointsource_snr(mag_range[i], mylist[-1], mylist[i], binning=1, N=1, elapsed_time=True, readout_time = readouttime)
+            mag_range.append(np.arange(saturation[i].value, 25, 0.05)* u.ABmag)
+            data1 = self.imager_list[0].pointsource_snr(mag_range[i], mylist[-1], mylist[i], binning=1, N=1,\
+                                                        elapsed_time=True, readout_time = readouttime)
             plt.subplot(self.num_cameras,1,i+1)
             plt.plot(mag_range[i], data1, linewidth=3)      
-            plt.ylim(0, 1000)
+            plt.ylim(0, data1[0] * 1.1)
             plt.xlabel('Magnitude / AB mag', fontsize=20)
             plt.ylabel('SNR in $\sigma$', fontsize=20)
             plt.title('SNR calculation of the range of magnitudes', fontsize=24)
             plt.gcf().set_size_inches(24, 10 * self.num_cameras)
-            
+          
+    #The following function generates a single plot of SNR versus magnitude taking all the imagers into account        
     def snr_plot(self, bit_depth, full_well, gain, minimum_magnitude, factor, readouttime = 2 * u.second):
         mylist = self.exposure_time_array(bit_depth, full_well, gain, minimum_magnitude, factor, readouttime)
         saturation = self.saturation_limits(bit_depth, full_well, gain, minimum_magnitude, factor, readouttime)
-        mag_range = np.arange(saturation[0].value, 40, 0.1) * u.ABmag
+        
+        '''The following bit of calculation generates a curve representing the combined SNR for different imagers, each 
+        taking a different exposure time, as calculated by exposure_time_array function '''
+        
+        mag_range = np.arange(saturation[0].value, 25, 0.01) * u.ABmag
         signal = []
         noise = []
         net_signal = 0 #initializing 
@@ -545,19 +552,44 @@ class ImagerArray:
         N = 1
         
         for i in range(0, self.num_cameras):
-            signal.append(self.imager_list[0].pointsource_snr(mag_range, mylist[-1], mylist[i], binning=1, N=1, elapsed_time=True, readout_time = readouttime, signoisereturn=True)[0].value)
-            noise.append(self.imager_list[0].pointsource_snr(mag_range, mylist[-1], mylist[i], binning=1, N=1, elapsed_time=True, readout_time = readouttime, signoisereturn=True)[1].value)
+            signal.append(self.imager_list[0].pointsource_snr(mag_range, mylist[-1], mylist[i], binning=1, N=1, \
+                                                              elapsed_time=True, readout_time = readouttime, \
+                                                              signoisereturn=True)[0].value)
+            noise.append(self.imager_list[0].pointsource_snr(mag_range, mylist[-1], mylist[i], binning=1, N=1, \
+                                                             elapsed_time=True, readout_time = readouttime, \
+                                                             signoisereturn=True)[1].value)
+            for j in range(0, int(round((25-saturation[0].value)/0.01))):
+                if mag_range[j] < saturation[i]:
+                    signal[i][j] = 0
+                    noise[i][j] = 0
             net_signal = net_signal + signal[i]
             net_noise = np.sqrt(net_noise ** 2 + noise[i] ** 2)
+            
         binning = binning * self.imager_list[0].n_pix
         snr = (N * binning)**0.5 * net_signal / net_noise
         
-        plt.plot(mag_range, snr, linewidth=3)
-        plt.ylim(0, 5000)
+        '''The following bit of calculation generates a curve representing the combined SNR of different imagers, all of them
+        taking the longest exposure time among the ones calculated by the exposure_time_array function'''
+        
+        magrange = np.arange(saturation[-1].value, 25, 0.01) * u.ABmag
+        
+        netsignal = self.num_cameras * self.imager_list[0].pointsource_snr(magrange, mylist[-1], mylist[-1], binning=1, N=1,\
+                                                              elapsed_time=True, readout_time = readouttime, \
+                                                              signoisereturn=True)[0].value
+        netnoise = np.sqrt(self.num_cameras) * self.imager_list[0].pointsource_snr(magrange, mylist[-1], mylist[-1], \
+                                                                                    binning=1, N=1, elapsed_time=True, \
+                                                                                    readout_time = readouttime, \
+                                                                                    signoisereturn=True)[1].value
+
+        snr1 = (N * binning)**0.5 * netsignal / netnoise
+        
+        
+        plt.semilogy(mag_range, snr, 'g-', label='Different exposure times', linewidth=3)
+        plt.semilogy(magrange, snr1, 'r-', label='Longest exposure time', linewidth=3)
+        plt.ylim(0, 3000)
+        plt.legend(loc='upper right', fancybox=True, framealpha=0.3, fontsize=20)
         plt.xlabel('Magnitude / AB mag', fontsize=20)
         plt.ylabel('SNR in $\sigma$', fontsize=20)
         plt.title('Combined SNR for the array of imagers', fontsize=24)
-        plt.gcf().set_size_inches(24, 12)
+        plt.gcf().set_size_inches(18, 12)
 
-            
-        
