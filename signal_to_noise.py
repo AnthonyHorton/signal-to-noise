@@ -50,7 +50,7 @@ class Camera:
                  QE_filename, minimum_exposure):
         """
         Class representing a camera, incorporated basic properties such
-        as pixel size, resolution, read noise and dark current.
+        as bit depth, full well, gain, readout time, pixel size, resolution, read noise and dark current.
         """
         self.bit_depth = ensure_unit(bit_depth, u.dimensionless_unscaled)
         self.full_well = ensure_unit(full_well, u.electron)
@@ -514,10 +514,14 @@ class ImagerArray:
         self.readout_time = self.imager_list[0].readout_time
     
     def HDR_mode(self, minimum_magnitude, factor=2, maximum_exptime = 300 * u.second, generate_plots=False):
-        return self.exposure_time_array(minimum_magnitude, factor, maximum_exptime), self.saturation_limits(minimum_magnitude,\
-               factor), self.total_time_calculation(minimum_magnitude, factor), self.snr_plot(minimum_magnitude, factor,\
-                                                                                              generate_plots) 
         
+        exptime_array = self.exposure_time_array(minimum_magnitude, factor, maximum_exptime)
+        saturation_limits_array = self.saturation_limits(minimum_magnitude, factor)
+        total_time_calc = self.total_time_calculation(minimum_magnitude, factor)
+        snr_plot_data = self.snr_plot(minimum_magnitude, factor, generate_plots)
+        
+        return exptime_array, saturation_limits_array, total_time_calc, snr_plot_data
+                                                                                            
     def exposure_time_array(self, minimum_magnitude, factor=2, maximum_exptime = 300 * u.second):
         mylist = [] #setting a list up
         a = [] #initializing a list
@@ -536,7 +540,7 @@ class ImagerArray:
         
         for i in range(0,num_exp_array):
             mylist.append(shortest_exposure * (factor ** i)) 
-            mylist[i] = int(np.round(mylist[i].to(u.second).value / 0.01)) * (0.01 * u.second)
+            mylist[i] = int(np.round(mylist[i].to(u.second).value / 0.01)) * (0.01 * u.second) #rounding to two decimal places
             
         return mylist
     
@@ -544,11 +548,12 @@ class ImagerArray:
         '''Given a list of exposure times that each camera spans through, total_time_calculation calculates the total exposure
         time and total elapsed time (includes the readout time between successive sub exposures'''
         mylist = self.exposure_time_array(minimum_magnitude, factor)
-        total_exp_time = 0 * u.second
-        total_elapsed_time = 0 * u.second
+        total_exp_time = 0 * u.second #initializing
+        
         for i in range(0, len(mylist)):
             total_exp_time = total_exp_time + mylist[i]
-            total_elapsed_time = total_elapsed_time + mylist[i] + self.readout_time
+         
+        total_elapsed_time = total_exp_time + len(mylist) * self.readout_time
         return total_exp_time, total_elapsed_time
     
     def saturation_limits(self, minimum_magnitude, factor=2):
@@ -567,7 +572,7 @@ class ImagerArray:
         saturation1 = self.imager_list[0].pointsource_saturation(total_elapsed_time)
         limit1 = self.imager_list[0].pointsource_limit(total_elapsed_time, 1.0, total_elapsed_time, binning=1,\
                                                        N=self.num_cameras, enable_read_noise=True, enable_sky_noise=True,\
-                                                       enable_dark_noise=True)
+                                                       enable_dark_noise=True) #the magnitude that gives a value of 1.0 SNR
         mag_range1 = np.arange(saturation1.value, limit1.value, 0.01) * u.ABmag
         snr1 = self.imager_list[0].pointsource_snr(mag_range1, total_elapsed_time, total_elapsed_time, binning=1,\
                                                    N=self.num_cameras)
@@ -589,7 +594,7 @@ class ImagerArray:
                                                               signoisereturn=True)[0].value)
             noise.append(self.imager_list[0].pointsource_snr(mag_range, mylist[i], mylist[i], binning=1, N=1, \
                                                              signoisereturn=True)[1].value)
-            
+            #For higher exposure times, the signal and noise below their respective saturation limits are assigned to be zero
             for j in range(0, int(round((limit1.value-saturation[0].value)/0.01))):
                 if mag_range[j] < saturation[i]:
                     signal[i][j] = 0
