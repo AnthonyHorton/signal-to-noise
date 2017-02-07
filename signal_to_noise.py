@@ -96,7 +96,7 @@ class Filter:
 
 class Imager:
 
-    def __init__(self, optic, camera, band, num_imagers = 1, num_computers = 5, PSF=None):
+    def __init__(self, optic, camera, band, num_imagers = 1, num_computer = 5, PSF=None):
         if not isinstance(optic, Optic):
             raise ValueError("optic must be an instance of the Optic class")
         if not isinstance(camera, Camera):
@@ -111,7 +111,7 @@ class Imager:
         self.band = band
         self.PSF = PSF
         self.num_imagers = ensure_unit(num_imagers, u.dimensionless_unscaled)
-        self.num_computers = ensure_unit(num_computers, u.dimensionless_unscaled)
+        self.num_computer = ensure_unit(num_computer, u.dimensionless_unscaled)
 
         #bit depth, full well, gain and readout time
         self.bit_depth = self.camera.bit_depth
@@ -527,7 +527,7 @@ class ImagerArray:
         return exptime_array, saturation_limits_array, total_time_calc, snr_plot_data
                                                                                             
     def exposure_time_array(self, minimum_magnitude, factor=2, maximum_exptime = 300 * u.second, num_longexp = 1):
-        mylist = [] #setting a list up
+        explist = [] #setting a list up
         a = [] #initializing a list
         
         '''Calculating the number of exposure times such that minimum exposure time is a factor^integer multiple 
@@ -544,32 +544,32 @@ class ImagerArray:
             shortest_exposure =  (maximum_exptime / (factor ** (num_exp_array - 1)))
             
         for i in range(0,num_exp_array):
-            mylist.append(shortest_exposure * (factor ** i)) 
-            mylist[i] = int(np.round(mylist[i].to(u.second).value / 0.01)) * (0.01 * u.second) #rounding to two decimal places
+            explist.append(shortest_exposure * (factor ** i)) 
+            explist[i] = int(np.round(explist[i].to(u.second).value / 0.01)) * (0.01* u.second) #rounding to two decimal places
         
         if num_longexp > 1:
             for i in range(0,num_longexp-1):
-                mylist.append(maximum_exptime)
+                explist.append(maximum_exptime)
                 
-        return mylist
+        return explist
     
     def total_time_calculation(self, minimum_magnitude, factor=2, maximum_exptime = 300 * u.second, num_longexp = 1):
         '''Given a list of exposure times that each camera spans through, total_time_calculation calculates the 
         total exposure time and total elapsed time (includes the readout time between successive sub exposures'''
-        mylist = self.exposure_time_array(minimum_magnitude, factor, maximum_exptime, num_longexp)
+        explist = self.exposure_time_array(minimum_magnitude, factor, maximum_exptime, num_longexp)
         total_exp_time = 0 * u.second #initializing
         
-        for i in range(0, len(mylist)):
-            total_exp_time = total_exp_time + mylist[i]
+        for i in range(0, len(explist)):
+            total_exp_time = total_exp_time + explist[i]
          
-        total_elapsed_time = total_exp_time + len(mylist) * self.readout_time
+        total_elapsed_time = total_exp_time + len(explist) * self.readout_time
         return total_exp_time, total_elapsed_time
     
     def saturation_limits(self, minimum_magnitude, factor=2, maximum_exptime = 300 * u.second, num_longexp = 1):
-        mylist = self.exposure_time_array(minimum_magnitude, factor, maximum_exptime, num_longexp)
+        explist = self.exposure_time_array(minimum_magnitude, factor, maximum_exptime, num_longexp)
         saturation = []
-        for i in range(0,len(mylist)):
-            saturation.append(self.imager_list[0].pointsource_saturation(mylist[i]))
+        for i in range(0,len(explist)):
+            saturation.append(self.imager_list[0].pointsource_saturation(explist[i]))
         return saturation
     
     def snr_plot(self, minimum_magnitude, factor, maximum_exptime = 300 * u.second, num_longexp = 1, generate_plots=False):
@@ -587,8 +587,8 @@ class ImagerArray:
                                                    N=self.num_imagers)
         
         '''The following calculation genererates a curve for the combined SNR of different imagers, with each 
-        imager spanning through all of the predetermined set of exposure times (mylist values)'''
-        mylist = self.exposure_time_array(minimum_magnitude, factor, maximum_exptime, num_longexp)
+        imager spanning through all of the predetermined set of exposure times (explist values)'''
+        explist = self.exposure_time_array(minimum_magnitude, factor, maximum_exptime, num_longexp)
         saturation = self.saturation_limits(minimum_magnitude, factor, maximum_exptime, num_longexp)
         mag_range = np.arange(saturation[0].value, limit1.value, 0.01) * u.ABmag
         signal = []
@@ -598,10 +598,10 @@ class ImagerArray:
         binning = 1
         N = 1
         
-        for i in range(0, len(mylist)):
-            signal.append(self.imager_list[0].pointsource_snr(mag_range, mylist[i], mylist[i], binning=1, N=1, \
+        for i in range(0, len(explist)):
+            signal.append(self.imager_list[0].pointsource_snr(mag_range, explist[i], explist[i], binning=1, N=1, \
                                                               signoisereturn=True)[0].value)
-            noise.append(self.imager_list[0].pointsource_snr(mag_range, mylist[i], mylist[i], binning=1, N=1, \
+            noise.append(self.imager_list[0].pointsource_snr(mag_range, explist[i], explist[i], binning=1, N=1, \
                                                              signoisereturn=True)[1].value)
             
             '''Ensuring that for higher exposure times, the signal and noise below their respective 
