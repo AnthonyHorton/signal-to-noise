@@ -562,7 +562,7 @@ class ImagerArray:
         for i in range(0, len(explist)):
             total_exp_time = total_exp_time + explist[i]
          
-        total_elapsed_time = total_exp_time + len(explist) * self.readout_time
+        total_elapsed_time = total_exp_time + len(explist) * self.imager_list[0].num_computer * self.readout_time
         return total_exp_time, total_elapsed_time
     
     def saturation_limits(self, minimum_magnitude, factor=2, maximum_exptime = 300 * u.second, num_longexp = 1):
